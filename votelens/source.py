@@ -1,10 +1,8 @@
-"""Load the canonical SNAP data and share vote and comment parsing."""
+"""Load SNAP vote records and locate the local toxicity scores."""
 
 import gzip
 import hashlib
-import html
 from pathlib import Path
-import re
 import shutil
 from tempfile import TemporaryDirectory
 from urllib.request import Request, urlopen
@@ -12,67 +10,71 @@ from urllib.request import Request, urlopen
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATA = ROOT / "data" / "wiki-RfA.txt.gz"
-SOURCE_URL = "https://snap.stanford.edu/data/wiki-RfA.html"
-DATA_URL = "https://snap.stanford.edu/data/wiki-RfA.txt.gz"
+DATA_DIR = ROOT / "data"
+OUTPUT_DIR = ROOT / "outputs" / "rfa_toxicity"
+DEFAULT_SNAP = DATA_DIR / "wiki-RfA.txt.gz"
+DEFAULT_SCORED = DATA_DIR / "wikipedia-rfa-toxicity.zip"
+
+SNAP_DOWNLOAD = "https://snap.stanford.edu/data/wiki-RfA.txt.gz"
 SNAP_SHA256 = "88d53196fb2564a2e20286dbba818832f718cc352bb181a2101d23d2556f0862"
-FIELDS = ["SRC", "TGT", "VOT", "RES", "YEA", "DAT", "TXT"]
-TOKEN_RE = re.compile(r"[^\W\d_]+(?:['’-][^\W\d_]+)*", re.UNICODE)
+FIELDS = ("SRC", "TGT", "VOT", "RES", "YEA", "DAT", "TXT")
 
 
-def sha256_file(path):
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def ensure_dataset(path=DEFAULT_DATA):
-    """Download and verify the official SNAP file when the local copy is absent."""
-    path = Path(path)
+def snap_path(path=None):
+    """Use a local SNAP file or download and verify the default copy."""
+    if path is not None:
+        return Path(path)
+    path = DEFAULT_SNAP
     if path.exists():
-        if sha256_file(path) != SNAP_SHA256:
-            raise ValueError(f"{path} does not match the expected SNAP checksum")
+        with path.open("rb") as source:
+            checksum = hashlib.file_digest(source, "sha256").hexdigest()
+        if checksum != SNAP_SHA256:
+            raise ValueError(f"Unexpected checksum for {path}. Pass a SNAP file with --data.")
         return path
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    request = Request(DATA_URL, headers={"User-Agent": "VoteLens Web Mining coursework/1.0"})
-    with TemporaryDirectory(prefix=".snap-", dir=path.parent) as directory:
-        staged = Path(directory) / path.name
-        with urlopen(request, timeout=45) as response, staged.open("wb") as output:
-            shutil.copyfileobj(response, output)
-        if sha256_file(staged) != SNAP_SHA256:
-            raise ValueError(f"The download from {DATA_URL} does not match the expected SNAP checksum")
+    request = Request(SNAP_DOWNLOAD, headers={"User-Agent": "VoteLens Web Mining coursework/1.0"})
+    with TemporaryDirectory(prefix=".download-", dir=path.parent) as temp:
+        staged = Path(temp) / path.name
+        with urlopen(request, timeout=60) as response, staged.open("wb") as target:
+            shutil.copyfileobj(response, target)
+        with staged.open("rb") as source:
+            checksum = hashlib.file_digest(source, "sha256").hexdigest()
+        if checksum != SNAP_SHA256:
+            raise ValueError("Unexpected checksum for the SNAP download")
         staged.replace(path)
     return path
 
 
-def parse_records(path):
-    """Read blank-line separated records without losing colons in comments."""
-    records, issues, current = [], [], {}
-    with gzip.open(path, "rt", encoding="utf-8", errors="strict") as stream:
-        for line_number, line in enumerate(stream, 1):
-            line = line.rstrip("\r\n")
-            if not line:
+def scored_path(path=None):
+    path = Path(path) if path is not None else DEFAULT_SCORED
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing toxicity scores at {path}. Pass a local ZIP or CSV with --scored.")
+    return path
+
+
+def read_snap(path):
+    """Read the blank-line-delimited SNAP records and keep colons inside values."""
+    gzip_input = Path(path).suffix == ".gz"
+    opener = gzip.open if gzip_input else open
+    records = []
+    current = {}
+    with opener(path, "rt", encoding="utf-8") as stream:
+        for number, line in enumerate(stream, 1):
+            row = line.rstrip("\r\n")
+            if not row:
                 if current:
                     records.append(current)
                     current = {}
                 continue
-            key, separator, value = line.partition(":")
-            if not separator or key not in FIELDS or key in current:
-                issues.append({"line": line_number, "content": line[:200]})
-                continue
-            current[key] = value
-        if current:
-            records.append(current)
-    raw = pd.DataFrame(records).reindex(columns=FIELDS)
-    return raw, issues
+            field, separator, value = row.partition(":")
+            if not separator or field not in FIELDS or field in current:
+                raise ValueError(f"Invalid SNAP field at line {number}")
+            current[field] = value
+    if current:
+        records.append(current)
 
-
-def clean_comment(text):
-    """Lightweight, explicit wiki-markup cleaning; not a MediaWiki renderer."""
-    text = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
-    text = re.sub(r"\[\[([^\[\]]+)\]\]", lambda m: m.group(1).split("|")[-1], text)
-    text = re.sub(r"\{\{.*?\}\}", " ", text)
-    text = re.sub(r"https?://\S+", " ", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = text.replace("'''", "").replace("''", "")
-    return html.unescape(text)
+    votes = pd.DataFrame.from_records(records, columns=FIELDS)
+    if votes.empty or votes.isna().any().any():
+        raise ValueError("SNAP input needs a complete set of seven fields per record")
+    return votes.rename(columns=str.lower)
