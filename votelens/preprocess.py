@@ -3,23 +3,17 @@
 import argparse
 import json
 from pathlib import Path
-import re
 from tempfile import TemporaryDirectory
 
 import pandas as pd
 
 from .source import OUTPUT_DIR, read_snap, snap_path
+from .text import CleanedComment, TEXT_STATUSES, TEXT_VERSION, clean_comment
 
 DEFAULT_OUTPUT = OUTPUT_DIR / "preprocessed"
 ELECTION_COLUMNS = ["tgt", "yea", "res", "vote_start"]
 GROUP_COLUMNS = ELECTION_COLUMNS[:-1]
 VOTE_GAP_DAYS = 7
-WIKI_PATTERNS = (
-    re.compile(r"<[^>]+>"),
-    re.compile(r"'''[^']+'''"),
-    re.compile(r"\[\[.*?\]\]"),
-    re.compile(r"\{\{.*?\}\}"),
-)
 
 
 def group_votes(votes):
@@ -48,17 +42,21 @@ def group_votes(votes):
 
 
 def clean_comments(votes):
-    comments = votes.loc[votes.txt.notna() & votes.txt.ne(""), ["textid", "txt"]].copy()
-    text = comments.pop("txt")
-    for pattern in WIKI_PATTERNS:
-        text = text.str.replace(pattern, "", regex=True)
-    comments["txt_clean"] = text
-    return comments
+    comments = votes.loc[votes.txt.notna() & votes.txt.ne(""), ["textid", "vot", "src", "txt"]]
+    cleaned = [
+        clean_comment(raw, vote, voter)
+        for raw, vote, voter in comments[["txt", "vot", "src"]].itertuples(index=False, name=None)
+    ]
+    text = pd.DataFrame(cleaned, index=comments.index, columns=CleanedComment._fields)
+    return comments[["textid", "vot"]].join(text)
 
 
 def preprocess(data_path, output):
     votes = group_votes(read_snap(data_path))
     comments = clean_comments(votes)
+    by_vote = comments.groupby(["vot", "text_status"]).size().unstack(fill_value=0)
+    by_vote = by_vote.reindex(index=[-1, 0, 1], columns=TEXT_STATUSES, fill_value=0)
+    by_status = by_vote.sum()
     summary = {
         "vote_records": len(votes),
         "inferred_rfa_keys": len(votes[ELECTION_COLUMNS].drop_duplicates()),
@@ -66,6 +64,12 @@ def preprocess(data_path, output):
         "missing_vote_start": int(votes.vote_start.isna().sum()),
         "nonempty_raw_comments": len(comments),
         "comments_empty_after_cleaning": int(comments.txt_clean.str.strip().eq("").sum()),
+        "text_preprocessing_version": TEXT_VERSION,
+        "text_status_counts": {status: int(count) for status, count in by_status.items()},
+        "text_status_by_vote": {
+            str(vote): {status: int(count) for status, count in row.items()}
+            for vote, row in by_vote.iterrows()
+        },
         "gap_threshold_days": VOTE_GAP_DAYS,
     }
 
@@ -73,7 +77,7 @@ def preprocess(data_path, output):
     with TemporaryDirectory(prefix=".preprocess-", dir=output) as temp:
         stage = Path(temp)
         votes.to_csv(stage / "votes.csv.gz", index=False, date_format="%Y-%m-%d")
-        comments.to_csv(stage / "comments_for_scoring.csv.gz", index=False)
+        comments.drop(columns="vot").to_csv(stage / "comments_for_scoring.csv.gz", index=False)
         (stage / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         for name in ("votes.csv.gz", "comments_for_scoring.csv.gz", "summary.json"):
             (stage / name).replace(output / name)

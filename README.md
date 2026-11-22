@@ -34,9 +34,11 @@ python -m votelens.eda --scored data/wikipedia-rfa-toxicity.zip
 1. Đọc bảy trường SNAP thành bảng, gán `textid` theo vị trí bản ghi và tách `DAT` thành ngày, giờ.
 2. Gom theo `tgt`, `yea` và `res`, rồi sắp phiếu theo ngày và giờ. Mở cụm mới khi hai phiếu liên tiếp trong nhóm cách nhau **hơn 7 ngày**. `vote_start` là ngày của phiếu mở cụm và được điền xuống trong cùng nhóm.
 3. Dùng khóa `(tgt, yea, res, vote_start)` để đếm một lần ứng cử. Đây là khóa suy ra cho phân tích hồi cứu. `res` là kết quả cuối đã biết trong dữ liệu.
-4. Lọc bình luận trống, rồi xóa thẻ HTML, nội dung in đậm, wiki link và template. Giữ `textid` để nối văn bản đã làm sạch với bản ghi SNAP.
+4. Dùng parser wikitext để giữ chữ trong đoạn in đậm, chữ nghiêng và nhãn hiển thị của liên kết. Bỏ URL, nội dung gạch ngang, nhãn phiếu đầu dòng và chữ ký khi nhận diện được. Giữ `txt` gốc trong bảng phiếu để đối chiếu qua `textid`.
 
-`preprocess.py` áp dụng các quy tắc trên cho SNAP. Báo cáo EDA đọc riêng bảng điểm toxicity cục bộ.
+`comments_for_scoring.csv.gz` lưu `txt_clean`, `text_status` và `text_flags` theo `textid`. Dùng trạng thái `ready` để chọn văn bản chấm điểm. Trạng thái `empty` và `symbols_only` đánh dấu dòng rỗng hoặc chỉ còn ký hiệu. Trạng thái `needs_review` giữ những trường hợp như template chưa nhận diện, chữ ký chưa rõ hoặc markup còn sót để kiểm tra. `summary.json` thống kê các trạng thái theo từng loại phiếu và ghi phiên bản cleaner.
+
+Báo cáo EDA đọc riêng bảng điểm toxicity cục bộ. Khi chấm lại, cần tính điểm trên đúng phiên bản `txt_clean` được dùng.
 
 ## Kết quả
 
@@ -47,8 +49,8 @@ Quy tắc 7 ngày tạo 4.126 khóa lần ứng cử suy ra từ SNAP. Trong gia
 | Đầu ra trong `outputs/rfa_toxicity/` | Nội dung |
 |---|---|
 | `preprocessed/votes.csv.gz` | Phiếu SNAP sau khi định dạng lại và gắn `vote_start`. |
-| `preprocessed/comments_for_scoring.csv.gz` | `textid` và bình luận đã làm sạch. |
-| `preprocessed/summary.json` | Số phiếu, khóa lần ứng cử suy ra, ngày thiếu và bình luận trống. |
+| `preprocessed/comments_for_scoring.csv.gz` | `textid`, bình luận sạch, trạng thái chấm và cờ cần kiểm tra. |
+| `preprocessed/summary.json` | Số phiếu, khóa lần ứng cử, ngày thiếu và thống kê chất lượng text theo loại phiếu. |
 | `eda/01_rfas_by_year.png` | Số lần ứng cử theo năm và kết quả. |
 | `eda/02_support_share.png` | Tỷ lệ ủng hộ trong số phiếu ủng hộ và phản đối, kèm trung vị theo năm và kết quả. |
 | `eda/03_toxicity_by_outcome.png` | Phân bố điểm toxicity theo kết quả ứng cử. |
