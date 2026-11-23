@@ -25,7 +25,6 @@ From the repository root:
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m unittest discover -s tests
 python -m votelens.stance
 ```
 
@@ -45,38 +44,30 @@ Outputs are written to `outputs/rfa_stance/`:
 - `top_features.csv`: the largest positive class coefficients.
 - `*.joblib`: fitted TF-IDF vectorizer and classical estimators.
 
-## RoBERTa experiment (GPU; run manually)
+## RoBERTa experiment (CUDA GPU machine)
 
 The transformer runner reuses the same data validation, chronological election split, label mapping,
 class weighting, primary metric, and test-overlap audit as the classical experiment.
 
-Authenticate the compute CLI you intend to use. Both commands open an official browser flow:
+Clone or copy the repository to a Linux machine with an NVIDIA GPU and working CUDA driver, then run
+from the repository root:
 
 ```sh
-kaggle auth login
-colab status
-```
-
-Verify with `kaggle kernels list --mine --page-size 1` and `colab sessions`. This host currently has
-no OS keyring service, so Colab OAuth may ask again on later commands. It still works, but persistent
-login requires either a desktop Secret Service keyring or Google Application Default Credentials; do
-not install a plaintext token backend merely to suppress the prompt.
-
-On the GPU machine, copy or clone the repository, then run:
-
-```sh
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements-transformer.txt
+python -c "import torch; assert torch.cuda.is_available(), 'CUDA GPU not available'; print(torch.cuda.get_device_name(0))"
 python -m votelens.stance_transformer \
   --model-name FacebookAI/roberta-base \
-  --batch-size 16 \
-  --gradient-accumulation 2 \
+  --batch-size 8 \
+  --gradient-accumulation 4 \
   --max-length 256 \
   --epochs 3
 ```
 
-If a T4 runs out of memory, reduce `--batch-size` to `8` and increase
-`--gradient-accumulation` to `4`. The effective batch size remains 32. The public checkpoint is
-ungated, so Hugging Face authentication is not required. You can verify it before training with:
+The effective batch size is 32 on one GPU. If memory is limited, reduce `--batch-size` and increase
+`--gradient-accumulation` by the same factor. The public checkpoint is ungated, so Hugging Face
+authentication is not required. It can be checked before training with:
 
 ```sh
 hf models info FacebookAI/roberta-base
@@ -84,79 +75,3 @@ hf models info FacebookAI/roberta-base
 
 The best validation checkpoint is selected by Macro-F1 with one-epoch early stopping. Results,
 predictions, and the saved tokenizer/model are written to `outputs/rfa_stance/roberta/`.
-
-### Run persistently on Kaggle
-
-This route uploads a private, checksummed copy of the required code and `stance_model.csv`, then
-starts a private Kaggle Kernel on GPU T4 ×2. Once `kaggle kernels push` confirms submission, the run
-is executing in Kaggle's cloud and the local laptop can be shut down.
-
-Authenticate once and verify the account:
-
-```sh
-kaggle auth login
-kaggle kernels list --mine --page-size 1
-```
-
-Prepare the upload directories using your Kaggle username:
-
-```sh
-python scripts/prepare_kaggle_roberta.py --owner YOUR_KAGGLE_USERNAME
-```
-
-Create the private input Dataset and wait until its status is ready:
-
-```sh
-kaggle datasets create -p kaggle_upload/dataset
-kaggle datasets status YOUR_KAGGLE_USERNAME/rfa-task-a-bundle
-```
-
-Submit the GPU Kernel. The command uploads and starts it; it does not need to remain attached to the
-terminal afterward:
-
-```sh
-kaggle kernels push -p kaggle_upload/kernel --accelerator NvidiaTeslaT4
-```
-
-After Kaggle confirms the push, the laptop may be turned off. Check it later and download the saved
-model, metrics, and predictions with:
-
-```sh
-kaggle kernels status YOUR_KAGGLE_USERNAME/rfa-task-a-roberta
-kaggle kernels logs YOUR_KAGGLE_USERNAME/rfa-task-a-roberta
-kaggle kernels files YOUR_KAGGLE_USERNAME/rfa-task-a-roberta
-kaggle kernels output YOUR_KAGGLE_USERNAME/rfa-task-a-roberta \
-  -p outputs/kaggle-roberta
-```
-
-For a later rerun after changing code or data, rebuild the package and use `kaggle datasets version`
-instead of `kaggle datasets create`:
-
-```sh
-kaggle datasets version -p kaggle_upload/dataset -m "Update Task A experiment"
-kaggle kernels push -p kaggle_upload/kernel --accelerator NvidiaTeslaT4
-```
-
-### Run through the Colab CLI
-
-The CLI sends only the runner file to Colab, so first commit and push this Task A implementation to
-a branch. Replace `YOUR_BRANCH` below with that pushed branch name:
-
-```sh
-colab run --gpu T4 --session rfa-stance --keep --timeout 0 \
-  scripts/run_roberta_colab.py \
-  --ref YOUR_BRANCH
-```
-
-The wrapper clones the branch on a fresh VM, installs the transformer requirements, trains the model,
-and creates `/content/rfa_stance_roberta.tar.gz`. Because `--keep` leaves the VM running, download the
-archive and then release the session:
-
-```sh
-colab download -s rfa-stance \
-  /content/rfa_stance_roberta.tar.gz \
-  outputs/rfa_stance_roberta.tar.gz
-colab stop -s rfa-stance
-```
-
-Do not stop the session before downloading: files on an ephemeral Colab VM are not persistent.

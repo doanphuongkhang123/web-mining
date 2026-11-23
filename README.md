@@ -187,4 +187,4 @@ python -m votelens.stance
 ```
 
 See [`docs/task_A_experiment.md`](docs/task_A_experiment.md) for the split rationale, output files,
-tests, and the separate GPU command for the RoBERTa experiment.
+and the CUDA GPU-machine command for the RoBERTa experiment.

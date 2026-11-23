@@ -3,7 +3,5 @@
 __pycache__/
 *.py[cod]
 /outputs/
-/kaggle_upload/
+/ignored/
 tests/
-scripts/
-kaggle/
