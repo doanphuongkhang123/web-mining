@@ -1,5 +1,6 @@
 -r requirements.txt
-accelerate>=1,<2
+accelerate==1.10.1
 datasets>=3,<5
-torch>=2.4
-transformers>=4.49,<6
+huggingface-hub==0.29.3
+torch==2.4.1
+transformers==4.49.0
