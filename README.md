@@ -1,101 +1,104 @@
-# Wikipedia RfA · Khai phá dữ liệu Web
+# Wikipedia Requests for Adminship Web Mining
 
-Dự án phân tích các cuộc thảo luận và biểu quyết Wikipedia Requests for Adminship
-(RfA). Mục tiêu là nghiên cứu thái độ ủng hộ, phản đối và trung lập trong bình luận,
-phân tích mạng lưới biểu quyết có dấu và dự đoán kết quả bầu chọn từ dữ liệu ban đầu.
+This project analyzes discussion and voting data from Wikipedia Requests for
+Adminship (RfA). Its goals are to study support, opposition, and neutrality in
+comments, analyze signed voting relationships, and predict election outcomes
+from information available early in each election.
 
-## Dữ liệu trong repository
+## Data in the Repository
 
-Repository cung cấp ba file dữ liệu cuối cho các tác vụ downstream:
+The repository provides three files for downstream tasks:
 
-| File | Vai trò |
+| File | Purpose |
 |---|---|
-| `data/stance_model.csv` | Dữ liệu bình luận dùng cho mô hình phân loại stance |
-| `data/election_model.csv` | Dữ liệu vote có timestamp dùng cho dự đoán kết quả election |
-| `data/rfa_modeling.csv.summary.json` | Số mẫu, cột dữ liệu, trạng thái text và checksum nguồn |
+| `data/stance_model.csv` | Comment-level data for stance classification |
+| `data/election_model.csv` | Timestamped vote-level data for election-outcome prediction |
+| `data/rfa_modeling.csv.summary.json` | Row counts, schema, text statuses, source checksums, and grouping metadata |
 
-Hai file CSV đã được làm sạch, nối dữ liệu và tạo `model_election_id`.
-Mỗi dòng là một lượt vote/bình luận trong một election.
+The two CSV files have been cleaned, joined, and assigned a unified
+`model_election_id`. Each row represents one vote and, when available, its
+associated comment.
 
-## Các trường chính
+## Main Columns
 
-| Trường | Ý nghĩa |
+| Column | Meaning |
 |---|---|
-| `textid` | ID duy nhất của một vote/comment trong dữ liệu SNAP |
-| `model_election_id` | ID của election sau khi thống nhất dữ liệu |
-| `election_id_source` | Election ID lấy từ graph hoặc suy ra bằng quy tắc 7 ngày |
-| `graph_election_id` | ID election trong mạng graph; có thể rỗng khi không nối được trực tiếp |
-| `timestamp` | Thời điểm vote theo UTC |
-| `timestamp_available` | Vote có timestamp dùng được hay không |
-| `vote_order` | Thứ tự vote trong election |
-| `voter` | Người bỏ phiếu |
-| `candidate` | Ứng viên |
-| `stance` | `1`: ủng hộ, `0`: trung lập, `-1`: phản đối |
-| `outcome` | `1`: được chấp thuận, `-1`: bị từ chối |
-| `txt_clean` | Bình luận sau khi loại vote label, chữ ký và wikitext |
-| `text_status` | `ready`, `needs_review`, `empty` hoặc `symbols_only` |
-| `text_flags` | Các thao tác hoặc cảnh báo trong quá trình làm sạch text |
-| `eligible_for_stance_model` | Row có comment sạch đủ điều kiện cho stance model |
-| `eligible_for_election_model` | Row có timestamp, election ID và outcome để phân tích early votes |
+| `textid` | Unique ID for a vote/comment record from the SNAP data |
+| `model_election_id` | Unified election ID after data integration |
+| `election_id_source` | Indicates whether the election ID came from the graph or the seven-day grouping rule |
+| `graph_election_id` | Election ID from the graph; may be empty when a direct graph match is unavailable |
+| `timestamp` | Vote time in UTC |
+| `timestamp_available` | Indicates whether the vote has a usable timestamp |
+| `vote_order` | Position of the vote within its election |
+| `voter` | User who cast the vote |
+| `candidate` | Candidate requesting adminship |
+| `stance` | Vote stance: `1` support, `0` neutral, `-1` oppose |
+| `outcome` | Election outcome: `1` approved, `-1` rejected |
+| `txt_clean` | Comment after removing vote labels, signatures, and wikitext |
+| `text_status` | `ready`, `needs_review`, `empty`, or `symbols_only` |
+| `text_flags` | Cleaning actions or warnings recorded during text preprocessing |
+| `eligible_for_stance_model` | Indicates whether the row has usable clean text for stance modeling |
+| `eligible_for_election_model` | Indicates whether the row has a timestamp, election ID, and outcome |
 
-## Tập dữ liệu stance
+## Stance Dataset
 
-Sử dụng `data/stance_model.csv`.
+Use `data/stance_model.csv`.
 
-- Số dòng: 170.540.
+- Rows: 170,540.
 - Input: `txt_clean`.
 - Target: `stance`.
-- Mọi dòng đều có `eligible_for_stance_model = True`.
-- Mỗi dòng là một bình luận ở trạng thái `ready`.
+- Every row has `eligible_for_stance_model = True`.
+- Every comment has `text_status = ready`.
 
-Các nhãn stance:
-
-```text
- 1 = Support / Ủng hộ
- 0 = Neutral / Trung lập
--1 = Oppose / Phản đối
-```
-
-Pipeline baseline đề xuất:
+Stance labels:
 
 ```text
-txt_clean -> TF-IDF -> Logistic Regression hoặc Linear SVM -> stance
+ 1 = Support
+ 0 = Neutral
+-1 = Oppose
 ```
 
-Metric chính là macro-F1 ba lớp. Không nên chỉ dùng accuracy vì dữ liệu stance mất
-cân bằng, đặc biệt lớp Neutral.
+Recommended baseline:
 
-## Tập dữ liệu election
+```text
+txt_clean -> TF-IDF -> Logistic Regression or Linear SVM -> stance
+```
 
-Sử dụng `data/election_model.csv`.
+The primary metric is three-class macro-F1. Accuracy alone is insufficient
+because the stance classes are imbalanced, particularly the Neutral class.
 
-- Số dòng: 188.904.
-- Mọi dòng đều có timestamp, election ID và outcome.
-- Mỗi dòng có `eligible_for_election_model = True`.
-- Dùng `vote_order` để lấy các cửa sổ 5, 10 và 20 votes đầu.
+## Election Dataset
 
-Để dự đoán outcome:
+Use `data/election_model.csv`.
 
-1. Nhóm dữ liệu theo `model_election_id`.
-2. Sắp theo `vote_order` hoặc `timestamp`.
-3. Chỉ lấy prefix đã quan sát tại thời điểm dự đoán.
-4. Tạo feature từ text, signed votes hoặc cả hai.
-5. Dùng `outcome` làm target.
+- Rows: 188,904.
+- Every row has a timestamp, election ID, and outcome.
+- Every row has `eligible_for_election_model = True`.
+- Use `vote_order` to construct prefixes containing the first 5, 10, or 20
+  votes.
 
-Các mô hình cần so sánh:
+To predict the election outcome:
 
-- Text-only.
-- Graph/vote-only.
-- Combined.
+1. Group rows by `model_election_id`.
+2. Sort by `vote_order` or `timestamp`.
+3. Keep only the prefix observed at the prediction time.
+4. Build features from text, signed votes, or both.
+5. Use `outcome` as the target.
+
+Compare at least:
+
+- Text-only model.
+- Graph/vote-only model.
+- Combined model.
 - Majority-class baseline.
 - Early signed-support-ratio baseline.
 
-## Chia train/validation/test theo thời gian
+## Chronological Train/Validation/Test Split
 
-Không chia ngẫu nhiên vì model thực tế chỉ được dùng dữ liệu quá khứ để dự đoán
-tương lai.
+Do not use a random split. A realistic forecasting system can only use past
+elections to predict future elections.
 
-Thiết lập đề xuất:
+Recommended split:
 
 ```text
 Train:      2004-2007
@@ -103,63 +106,73 @@ Validation: 2008
 Test:       2009-2012
 ```
 
-Toàn bộ votes và comments thuộc cùng một election phải nằm trong cùng split. Metric
-chính cho outcome prediction là macro-F1 hai lớp.
+All votes and comments from the same election must remain in the same split.
+The primary metric for election-outcome prediction is two-class macro-F1.
 
-## Tránh rò rỉ dữ liệu
+## Leakage Prevention
 
-- Không dùng `outcome` làm feature.
-- Không giữ nhãn `Support/Oppose/Neutral` trong text input.
-- Khi dự đoán sau 5 hoặc 10 votes, không dùng các votes sau đó.
-- Không dùng số lượng vote cuối election để xây dựng early-window feature.
-- Feature graph chỉ được phép dùng thông tin từ các election trước thời điểm dự đoán.
-- Fit TF-IDF, scaler và các bộ tham số chỉ trên train split.
+- Never use `outcome` as an input feature.
+- Remove explicit `Support`, `Oppose`, and `Neutral` labels from model text.
+- Do not use votes occurring after a prediction point.
+- Do not use the final election length to construct an early-window feature.
+- Build graph features only from elections that occurred before the target
+  election.
+- Fit TF-IDF, scalers, and other learned preprocessing steps only on the
+  training split.
 
-## Election ID
+## Election IDs
 
-Election ID được thống nhất theo cách sau:
+Election IDs were consolidated as follows:
 
-1. Nếu vote nối được với graph qua `textid = record_id`, ưu tiên `graph.election_id`.
-2. Truyền graph ID đó cho toàn bộ votes trong cùng election, kể cả neutral votes.
-3. Nếu election không có trong graph, dùng key suy luận:
+1. When a vote matches the graph through `textid = record_id`, use the graph's
+   `election_id`.
+2. Propagate that graph ID to every vote in the same election, including neutral
+   votes.
+3. For elections without a graph match, use the inferred key:
 
 ```text
 candidate + year + outcome + vote_start
 ```
 
-`outcome` chỉ được dùng để phân biệt các nhóm election trong dữ liệu lịch sử. Khi mô
-hình hóa, nó phải được tách riêng thành target và tuyệt đối không đưa vào feature.
+`outcome` is used to distinguish historical inferred groups. During modeling,
+it must be stored separately as the target and must never be used as an input
+feature.
 
-## Giá trị rỗng
+## Missing Values
 
-Một số trường có thể rỗng nhưng không phải lỗi:
+Some fields may be empty without indicating a processing error:
 
-- `graph_election_id` rỗng: election không match trực tiếp với graph.
-- `timestamp` rỗng: dữ liệu gốc không có thời gian hợp lệ.
-- `txt_clean` rỗng: không có comment usable sau preprocessing.
-- `text_flags` rỗng: quá trình làm sạch không phát hiện warning hay thao tác cần ghi.
+- An empty `graph_election_id` means that the election did not match the graph
+  directly.
+- An empty `timestamp` means that the source data did not provide a valid time.
+- An empty `txt_clean` means that no usable comment remained after
+  preprocessing.
+- An empty `text_flags` usually means that no warning or special cleaning action
+  was recorded.
 
-Trong các file task-specific, dữ liệu đã được lọc bằng cờ `eligible_for_*`, nên không
-cần tự động xóa mọi giá trị rỗng.
+The task-specific files have already been filtered with the corresponding
+`eligible_for_*` flag. Do not automatically remove every row containing a
+missing value.
 
-## Kết quả dữ liệu
+## Data Summary
 
-Tệp `data/rfa_modeling.csv.summary.json` ghi lại:
+`data/rfa_modeling.csv.summary.json` records:
 
-- 198.275 rows trước khi tách task.
-- 4.120 elections đã thống nhất.
-- 170.540 rows cho stance model.
-- 188.904 rows cho election model.
-- Phân bố trạng thái text.
-- SHA-256 của các file nguồn.
-- Quy tắc tạo election ID.
+- 198,275 rows before task-specific filtering.
+- 4,120 unified elections.
+- 170,540 rows for the stance model.
+- 188,904 rows for the election model.
+- Text-status counts.
+- Source-file SHA-256 checksums.
+- The election-ID construction rules.
 
-## Phạm vi hiện tại
+## Current Scope
 
-Repository hiện cung cấp dữ liệu đã được chuẩn bị cho modeling. Phần còn lại là:
+The repository currently contains prepared data for modeling. The remaining work
+is to:
 
-1. Train stance model.
-2. Tạo early-window text features.
-3. Tạo graph features có tính đến thời gian.
-4. Train và so sánh text-only, graph-only và combined models.
-5. Báo cáo macro-F1 và performance theo observation window.
+1. Train the stance model.
+2. Create early-window text features.
+3. Create time-aware graph features.
+4. Train and compare text-only, graph-only, and combined models.
+5. Report macro-F1 and performance across observation windows.
