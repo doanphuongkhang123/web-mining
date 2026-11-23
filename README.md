@@ -1,60 +1,165 @@
-# Wikipedia RfA toxicity · Web Mining
+# Wikipedia RfA · Khai phá dữ liệu Web
 
-Pipeline Python xử lý phiếu và phân tích mức độ toxicity trong các lần ứng cử quản trị viên Wikipedia. Báo cáo gồm bốn biểu đồ cho giai đoạn 2004–2012.
+Dự án phân tích các cuộc thảo luận và biểu quyết Wikipedia Requests for Adminship
+(RfA). Mục tiêu là nghiên cứu thái độ ủng hộ, phản đối và trung lập trong bình luận,
+phân tích mạng lưới biểu quyết có dấu và dự đoán kết quả bầu chọn từ dữ liệu ban đầu.
 
-## Chạy pipeline
+## Dữ liệu trong repository
 
-Dùng Python 3.12. Đặt file điểm toxicity ở `data/wikipedia-rfa-toxicity.zip`, rồi chạy từ thư mục gốc của repo:
+Repository cung cấp ba file dữ liệu cuối cho các tác vụ downstream:
 
-```sh
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m votelens
+| File | Vai trò |
+|---|---|
+| `data/stance_model.csv` | Dữ liệu bình luận dùng cho mô hình phân loại stance |
+| `data/election_model.csv` | Dữ liệu vote có timestamp dùng cho dự đoán kết quả election |
+| `data/rfa_modeling.csv.summary.json` | Số mẫu, cột dữ liệu, trạng thái text và checksum nguồn |
+
+Hai file CSV đã được làm sạch, nối dữ liệu và tạo `model_election_id`.
+Mỗi dòng là một lượt vote/bình luận trong một election.
+
+## Các trường chính
+
+| Trường | Ý nghĩa |
+|---|---|
+| `textid` | ID duy nhất của một vote/comment trong dữ liệu SNAP |
+| `model_election_id` | ID của election sau khi thống nhất dữ liệu |
+| `election_id_source` | Election ID lấy từ graph hoặc suy ra bằng quy tắc 7 ngày |
+| `graph_election_id` | ID election trong mạng graph; có thể rỗng khi không nối được trực tiếp |
+| `timestamp` | Thời điểm vote theo UTC |
+| `timestamp_available` | Vote có timestamp dùng được hay không |
+| `vote_order` | Thứ tự vote trong election |
+| `voter` | Người bỏ phiếu |
+| `candidate` | Ứng viên |
+| `stance` | `1`: ủng hộ, `0`: trung lập, `-1`: phản đối |
+| `outcome` | `1`: được chấp thuận, `-1`: bị từ chối |
+| `txt_clean` | Bình luận sau khi loại vote label, chữ ký và wikitext |
+| `text_status` | `ready`, `needs_review`, `empty` hoặc `symbols_only` |
+| `text_flags` | Các thao tác hoặc cảnh báo trong quá trình làm sạch text |
+| `eligible_for_stance_model` | Row có comment sạch đủ điều kiện cho stance model |
+| `eligible_for_election_model` | Row có timestamp, election ID và outcome để phân tích early votes |
+
+## Tập dữ liệu stance
+
+Sử dụng `data/stance_model.csv`.
+
+- Số dòng: 170.540.
+- Input: `txt_clean`.
+- Target: `stance`.
+- Mọi dòng đều có `eligible_for_stance_model = True`.
+- Mỗi dòng là một bình luận ở trạng thái `ready`.
+
+Các nhãn stance:
+
+```text
+ 1 = Support / Ủng hộ
+ 0 = Neutral / Trung lập
+-1 = Oppose / Phản đối
 ```
 
-Script tự tải và kiểm tra SHA-256 của file SNAP khi chưa có bản cục bộ.
+Pipeline baseline đề xuất:
 
-| File đầu vào | Vai trò |
-|---|---|
-| `wiki-RfA.txt.gz` | Phiếu SNAP để nhóm lần ứng cử và làm sạch bình luận. |
-| `wikipedia-rfa-toxicity.zip` | Bảng phiếu có cột `toxicity` để chạy EDA. |
-
-Có thể chỉ định file ZIP hoặc CSV khác bằng `--scored`. Bảng điểm cần các cột `textid`, `tgt`, `yea`, `res`, `vote_start`, `src`, `vot`, `txt` và `toxicity`. Trong bảng này, `vote_start` là số ngày kể từ 01/01/1970, còn `toxicity` nằm trong khoảng 0–1.
-
-Chạy riêng từng phần với file đã tải hoặc trích xuất:
-
-```sh
-python -m votelens.preprocess --data data/wiki-RfA.txt.gz
-python -m votelens.eda --scored data/wikipedia-rfa-toxicity.zip
+```text
+txt_clean -> TF-IDF -> Logistic Regression hoặc Linear SVM -> stance
 ```
 
-## Preprocessing
+Metric chính là macro-F1 ba lớp. Không nên chỉ dùng accuracy vì dữ liệu stance mất
+cân bằng, đặc biệt lớp Neutral.
 
-1. Đọc bảy trường SNAP thành bảng, gán `textid` theo vị trí bản ghi và tách `DAT` thành ngày, giờ.
-2. Gom theo `tgt`, `yea` và `res`, rồi sắp phiếu theo ngày và giờ. Mở cụm mới khi hai phiếu liên tiếp trong nhóm cách nhau **hơn 7 ngày**. `vote_start` là ngày của phiếu mở cụm và được điền xuống trong cùng nhóm.
-3. Dùng khóa `(tgt, yea, res, vote_start)` để đếm một lần ứng cử. Đây là khóa suy ra cho phân tích hồi cứu. `res` là kết quả cuối đã biết trong dữ liệu.
-4. Dùng parser wikitext để giữ chữ trong đoạn in đậm, chữ nghiêng và nhãn hiển thị của liên kết. Bỏ URL, nội dung gạch ngang, nhãn phiếu đầu dòng và chữ ký khi nhận diện được. Giữ `txt` gốc trong bảng phiếu để đối chiếu qua `textid`.
+## Tập dữ liệu election
 
-`comments_for_scoring.csv.gz` lưu `txt_clean`, `text_status` và `text_flags` theo `textid`. Dùng trạng thái `ready` để chọn văn bản chấm điểm. Trạng thái `empty` và `symbols_only` đánh dấu dòng rỗng hoặc chỉ còn ký hiệu. Trạng thái `needs_review` giữ những trường hợp như template chưa nhận diện, chữ ký chưa rõ hoặc markup còn sót để kiểm tra. `summary.json` thống kê các trạng thái theo từng loại phiếu và ghi phiên bản cleaner.
+Sử dụng `data/election_model.csv`.
 
-Báo cáo EDA đọc riêng bảng điểm toxicity cục bộ. Khi chấm lại, cần tính điểm trên đúng phiên bản `txt_clean` được dùng.
+- Số dòng: 188.904.
+- Mọi dòng đều có timestamp, election ID và outcome.
+- Mỗi dòng có `eligible_for_election_model = True`.
+- Dùng `vote_order` để lấy các cửa sổ 5, 10 và 20 votes đầu.
 
-## Kết quả
+Để dự đoán outcome:
 
-File chính là `outputs/rfa_toxicity/eda/report.html`. Mở file trong thư mục đầu ra để xem bảng minh họa và bốn biểu đồ.
+1. Nhóm dữ liệu theo `model_election_id`.
+2. Sắp theo `vote_order` hoặc `timestamp`.
+3. Chỉ lấy prefix đã quan sát tại thời điểm dự đoán.
+4. Tạo feature từ text, signed votes hoặc cả hai.
+5. Dùng `outcome` làm target.
 
-Quy tắc 7 ngày tạo 4.126 khóa lần ứng cử suy ra từ SNAP. Trong giai đoạn 2004–2012, bảng điểm có 79.908 bản ghi, tương ứng 1.950 khóa lần ứng cử và 78.733 bình luận có điểm toxicity.
+Các mô hình cần so sánh:
 
-| Đầu ra trong `outputs/rfa_toxicity/` | Nội dung |
-|---|---|
-| `preprocessed/votes.csv.gz` | Phiếu SNAP sau khi định dạng lại và gắn `vote_start`. |
-| `preprocessed/comments_for_scoring.csv.gz` | `textid`, bình luận sạch, trạng thái chấm và cờ cần kiểm tra. |
-| `preprocessed/summary.json` | Số phiếu, khóa lần ứng cử, ngày thiếu và thống kê chất lượng text theo loại phiếu. |
-| `eda/01_rfas_by_year.png` | Số lần ứng cử theo năm và kết quả. |
-| `eda/02_support_share.png` | Tỷ lệ ủng hộ trong số phiếu ủng hộ và phản đối, kèm trung vị theo năm và kết quả. |
-| `eda/03_toxicity_by_outcome.png` | Phân bố điểm toxicity theo kết quả ứng cử. |
-| `eda/04_toxicity_by_vote.png` | Phân bố điểm toxicity theo loại phiếu. |
-| `eda/*.csv`, `eda/summary.json` | Dữ liệu tổng hợp cho biểu đồ và thống kê số mẫu. |
+- Text-only.
+- Graph/vote-only.
+- Combined.
+- Majority-class baseline.
+- Early signed-support-ratio baseline.
 
-Các năm 2003 và 2013 chỉ được ghi nhận một phần trong SNAP, nên EDA tập trung vào các năm 2004–2012.
+## Chia train/validation/test theo thời gian
+
+Không chia ngẫu nhiên vì model thực tế chỉ được dùng dữ liệu quá khứ để dự đoán
+tương lai.
+
+Thiết lập đề xuất:
+
+```text
+Train:      2004-2007
+Validation: 2008
+Test:       2009-2012
+```
+
+Toàn bộ votes và comments thuộc cùng một election phải nằm trong cùng split. Metric
+chính cho outcome prediction là macro-F1 hai lớp.
+
+## Tránh rò rỉ dữ liệu
+
+- Không dùng `outcome` làm feature.
+- Không giữ nhãn `Support/Oppose/Neutral` trong text input.
+- Khi dự đoán sau 5 hoặc 10 votes, không dùng các votes sau đó.
+- Không dùng số lượng vote cuối election để xây dựng early-window feature.
+- Feature graph chỉ được phép dùng thông tin từ các election trước thời điểm dự đoán.
+- Fit TF-IDF, scaler và các bộ tham số chỉ trên train split.
+
+## Election ID
+
+Election ID được thống nhất theo cách sau:
+
+1. Nếu vote nối được với graph qua `textid = record_id`, ưu tiên `graph.election_id`.
+2. Truyền graph ID đó cho toàn bộ votes trong cùng election, kể cả neutral votes.
+3. Nếu election không có trong graph, dùng key suy luận:
+
+```text
+candidate + year + outcome + vote_start
+```
+
+`outcome` chỉ được dùng để phân biệt các nhóm election trong dữ liệu lịch sử. Khi mô
+hình hóa, nó phải được tách riêng thành target và tuyệt đối không đưa vào feature.
+
+## Giá trị rỗng
+
+Một số trường có thể rỗng nhưng không phải lỗi:
+
+- `graph_election_id` rỗng: election không match trực tiếp với graph.
+- `timestamp` rỗng: dữ liệu gốc không có thời gian hợp lệ.
+- `txt_clean` rỗng: không có comment usable sau preprocessing.
+- `text_flags` rỗng: quá trình làm sạch không phát hiện warning hay thao tác cần ghi.
+
+Trong các file task-specific, dữ liệu đã được lọc bằng cờ `eligible_for_*`, nên không
+cần tự động xóa mọi giá trị rỗng.
+
+## Kết quả dữ liệu
+
+Tệp `data/rfa_modeling.csv.summary.json` ghi lại:
+
+- 198.275 rows trước khi tách task.
+- 4.120 elections đã thống nhất.
+- 170.540 rows cho stance model.
+- 188.904 rows cho election model.
+- Phân bố trạng thái text.
+- SHA-256 của các file nguồn.
+- Quy tắc tạo election ID.
+
+## Phạm vi hiện tại
+
+Repository hiện cung cấp dữ liệu đã được chuẩn bị cho modeling. Phần còn lại là:
+
+1. Train stance model.
+2. Tạo early-window text features.
+3. Tạo graph features có tính đến thời gian.
+4. Train và so sánh text-only, graph-only và combined models.
+5. Báo cáo macro-F1 và performance theo observation window.
