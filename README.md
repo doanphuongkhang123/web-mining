@@ -176,3 +176,15 @@ is to:
 3. Create time-aware graph features.
 4. Train and compare text-only, graph-only, and combined models.
 5. Report macro-F1 and performance across observation windows.
+
+## Task A: stance mining
+
+The vote-level stance experiment uses the prepared `data/stance_model.csv` and predicts oppose,
+neutral, or support from cleaned comment text. Run the classical baselines with:
+
+```sh
+python -m votelens.stance
+```
+
+See [`docs/task_A_experiment.md`](docs/task_A_experiment.md) for the split rationale, output files,
+tests, and the separate GPU command for the RoBERTa experiment.
