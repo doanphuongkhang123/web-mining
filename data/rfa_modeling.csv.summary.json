@@ -1,0 +1,60 @@
+{
+  "rows": 198275,
+  "elections": 4120,
+  "graph_elections": 3571,
+  "inferred_elections": 549,
+  "rows_with_graph_election_id": 160995,
+  "eligible_stance_rows": 170540,
+  "eligible_election_rows": 188904,
+  "elections_with_ordered_timestamps": 4089,
+  "text_status_counts": {
+    "ready": 170540,
+    "empty": 12145,
+    "nan": 7190,
+    "needs_review": 4413,
+    "symbols_only": 3987
+  },
+  "columns": [
+    "textid",
+    "model_election_id",
+    "election_id_source",
+    "graph_election_id",
+    "timestamp",
+    "timestamp_available",
+    "vote_order",
+    "voter",
+    "candidate",
+    "stance",
+    "outcome",
+    "txt_clean",
+    "text_status",
+    "text_flags",
+    "eligible_for_stance_model",
+    "eligible_for_election_model"
+  ],
+  "input_sha256": {
+    "preprocessed/votes.csv": "f2a967df2fa5a9f31604e5ea74cde311e2a0197e971f3947ddf84cc86c1be964",
+    "preprocessed/comments_for_scoring.csv": "8033366eb61664d0ef654fbd83c618b78250d030c37229584e50fa49d177d68b",
+    "graph/signed_edges.csv": "b49f85621036a3d2084fd163463d448b0a093a1290dec377daa4e6c08e494e2d"
+  },
+  "grouping": {
+    "primary": "graph.election_id propagated to every vote in its inferred group",
+    "fallback": [
+      "tgt",
+      "yea",
+      "res",
+      "vote_start"
+    ],
+    "fallback_gap_rule_days": 7
+  },
+  "task_datasets": {
+    "stance_model.csv": {
+      "rows": 170540,
+      "filter": "eligible_for_stance_model == True"
+    },
+    "election_model.csv": {
+      "rows": 188904,
+      "filter": "eligible_for_election_model == True"
+    }
+  }
+}
